@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+cmake .. -DWEBVIEW_ENABLE_CLANG_FORMAT=False -DWEBVIEW_BUILD_AMALGAMATION=False
