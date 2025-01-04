@@ -303,6 +303,35 @@ private:
     add_init_script("function(message) {\n\
   return window.webkit.messageHandlers.__webview__.postMessage(message);\n\
 }");
+
+
+    // TODO: Would be nice to have this configurable from the API.
+    auto on_decide_policy = +[] (WebKitWebView *,
+      WebKitPolicyDecision     *decision,
+      WebKitPolicyDecisionType  decision_type, gpointer) -> gboolean {
+      if (decision_type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
+        return FALSE; // Continue with the default handler
+    }
+
+    WebKitNavigationPolicyDecision * navigation_decision = WEBKIT_NAVIGATION_POLICY_DECISION (decision);
+    WebKitNavigationAction * navigation_action = webkit_navigation_policy_decision_get_navigation_action (navigation_decision);
+    WebKitURIRequest * request = webkit_navigation_action_get_request (navigation_action);
+    const char * uri = webkit_uri_request_get_uri (request);
+
+    if (g_str_has_prefix(uri, "file://") ||
+    g_str_has_prefix(uri, "http://localhost") ||
+    g_str_has_prefix(uri, "http://127.0.0.1") ||
+    g_str_has_prefix(uri, "http://[::1]")) {
+    printf("Allowing %s URI\n", uri);
+    return FALSE; // Continue with the default handler
+    } else {
+    printf("Blocking %s URI at %s:%d\n", uri, __FILE__, __LINE__);
+    webkit_policy_decision_ignore(decision);
+    return TRUE; // Stop the default handler
+    }
+    };
+    g_signal_connect(GTK_WIDGET(m_webview), "decide-policy",
+    G_CALLBACK(on_decide_policy), this);
   }
 
   void window_settings(bool debug) {
