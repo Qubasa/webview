@@ -15,17 +15,19 @@
         default = pkgs.mkShell.override
           {
             # Override stdenv in order to change compiler:
-            # stdenv = pkgs.clangStdenv;
+            stdenv = pkgs.clangStdenv;
           }
           {
             packages = with pkgs; [
-              clang-tools
+              # clang-tools
               cmake
               doxygen
               pkg-config
+            ] ++ (if system == "aarch64-darwin" then [ ] else [ 
               gtk4
               webkitgtk_6_0
-            ] ++ (if system == "aarch64-darwin" then [ ] else [ gdb ]);
+              gdb 
+            ]);
           };
       });
     };
