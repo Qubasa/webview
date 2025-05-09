@@ -232,6 +232,7 @@ protected:
       var promise = new Promise(function(resolve, reject) {\n\
         _promises[_id] = { resolve, reject };\n\
       });\n\
+      promise._webviewMessageId = _id;\n\
       this.post(JSON.stringify({\n\
         id: _id,\n\
         method: method,\n\
