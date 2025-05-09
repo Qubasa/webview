@@ -305,6 +305,7 @@ private:
 }");
 
 
+    //===================MY CHANGES=========================
     // TODO: Would be nice to have this configurable from the API.
     auto on_decide_policy = +[] (WebKitWebView *,
       WebKitPolicyDecision     *decision,
@@ -332,6 +333,7 @@ private:
     };
     g_signal_connect(GTK_WIDGET(m_webview), "decide-policy",
     G_CALLBACK(on_decide_policy), this);
+    //============END=========
   }
 
   void window_settings(bool debug) {
