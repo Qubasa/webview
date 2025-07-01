@@ -138,8 +138,8 @@ TEST_CASE("Test synchronous binding and unbinding") {
   };
   unsigned int number = 0;
   webview::webview w(false, nullptr);
-  auto test = [&](const std::string &req) -> std::string {
-    auto increment = [&](const std::string & /*req*/) -> std::string {
+  auto test = [&](const std::string &req, const std::string & /*metadata*/) -> std::string {
+    auto increment = [&](const std::string & /*req*/, const std::string & /*metadata*/) -> std::string {
       ++number;
       return "";
     };
@@ -200,11 +200,11 @@ TEST_CASE("The string returned from a binding call must be JSON") {
 
   webview::webview w(true, nullptr);
 
-  w.bind("loadData", [](const std::string & /*req*/) -> std::string {
+  w.bind("loadData", [](const std::string & /*req*/, const std::string & /*metadata*/) -> std::string {
     return "\"hello\"";
   });
 
-  w.bind("endTest", [&](const std::string &req) -> std::string {
+  w.bind("endTest", [&](const std::string &req, const std::string & /*metadata*/) -> std::string {
     REQUIRE(req != "[2]");
     REQUIRE(req != "[1]");
     REQUIRE(req == "[0]");
@@ -230,12 +230,12 @@ TEST_CASE("The string returned of a binding call must not be JS") {
 
   webview::webview w(true, nullptr);
 
-  w.bind("loadData", [](const std::string & /*req*/) -> std::string {
+  w.bind("loadData", [](const std::string & /*req*/, const std::string & /*metadata*/) -> std::string {
     // Try to load malicious JS code
     return "(()=>{document.body.innerHTML='gotcha';return 'hello';})()";
   });
 
-  w.bind("endTest", [&](const std::string &req) -> std::string {
+  w.bind("endTest", [&](const std::string &req, const std::string & /*metadata*/) -> std::string {
     REQUIRE(req != "[0]");
     REQUIRE(req != "[2]");
     REQUIRE(req == "[1]");
@@ -294,6 +294,124 @@ TEST_CASE("Ensure that JS code can call native code and vice versa") {
 }
 
 #define ASSERT_WEBVIEW_FAILED(expr) REQUIRE(WEBVIEW_FAILED(expr))
+
+TEST_CASE("Test metadata field functionality") {
+  constexpr auto html =
+      R"html(<script>
+  let testStep = 0;
+  
+  function runNextTest() {
+    testStep++;
+    switch(testStep) {
+      case 1:
+        // Test 1: Send metadata to backend and verify it's received
+        window.testMetadata('{"test": "metadata1", "step": 1}')
+          .then(result => {
+            if (result.result === "metadata_received" && result.metadata.echo === "metadata1") {
+              runNextTest();
+            } else {
+              window.endTest(1, "Test 1 failed: metadata not properly received");
+            }
+          })
+          .catch(err => window.endTest(1, "Test 1 error: " + err));
+        break;
+        
+      case 2:
+        // Test 2: Test complex metadata object
+        window.testMetadata('{"user": {"id": 123, "name": "test"}, "timestamp": 1234567890}')
+          .then(result => {
+            if (result.result === "metadata_received" && result.metadata.user_id === 123) {
+              runNextTest();
+            } else {
+              window.endTest(1, "Test 2 failed: complex metadata not handled");
+            }
+          })
+          .catch(err => window.endTest(1, "Test 2 error: " + err));
+        break;
+        
+      case 3:
+        // Test 3: Test empty metadata (should default to {})
+        window.testMetadata('{}')
+          .then(result => {
+            if (result.result === "metadata_received" && result.metadata.default === true) {
+              runNextTest();
+            } else {
+              window.endTest(1, "Test 3 failed: empty metadata not handled");
+            }
+          })
+          .catch(err => window.endTest(1, "Test 3 error: " + err));
+        break;
+        
+      case 4:
+        // Test 4: Test metadata in synchronous binding
+        window.testSyncMetadata('{"sync": true, "test": "sync_test"}')
+          .then(result => {
+            if (result.result === "sync_metadata_received" && result.metadata.sync_echo === "sync_test") {
+              window.endTest(0, "All metadata tests passed");
+            } else {
+              window.endTest(1, "Test 4 failed: sync metadata not handled");
+            }
+          })
+          .catch(err => window.endTest(1, "Test 4 error: " + err));
+        break;
+    }
+  }
+  
+  // Start tests when page loads
+  window.onload = () => runNextTest();
+</script>)html";
+
+  std::string last_received_metadata;
+  
+  webview::webview w(true, nullptr);
+
+  // Asynchronous binding to test metadata reception
+  w.bind("testMetadata", [&](const std::string &req, const std::string &metadata) -> std::string {
+    last_received_metadata = metadata;
+    
+    // Parse the metadata to verify it was received correctly
+    if (metadata.find("\"test\": \"metadata1\"") != std::string::npos) {
+      // Test 1: Echo back the test value
+      return R"({"result": "metadata_received", "metadata": {"echo": "metadata1"}})";
+    } else if (metadata.find("\"user\"") != std::string::npos && metadata.find("\"id\": 123") != std::string::npos) {
+      // Test 2: Extract user ID from complex metadata
+      return R"({"result": "metadata_received", "metadata": {"user_id": 123}})";
+    } else if (metadata == "{}") {
+      // Test 3: Handle empty metadata
+      return R"({"result": "metadata_received", "metadata": {"default": true}})";
+    }
+    
+    return R"({"result": "metadata_unknown", "metadata": {}})";
+  });
+
+  // Synchronous binding to test metadata in sync mode
+  w.bind("testSyncMetadata", [&](const std::string &req, const std::string &metadata) -> std::string {
+    last_received_metadata = metadata;
+    
+    if (metadata.find("\"sync\": true") != std::string::npos && metadata.find("\"test\": \"sync_test\"") != std::string::npos) {
+      return R"({"result": "sync_metadata_received", "metadata": {"sync_echo": "sync_test"}})";
+    }
+    
+    return R"({"result": "sync_metadata_failed", "metadata": {}})";
+  });
+
+  // End test binding
+  w.bind("endTest", [&](const std::string &req, const std::string &metadata) -> std::string {
+    // Parse the request to get test result and message
+    if (req.find("[0") != std::string::npos) {
+      // All tests passed
+      REQUIRE(last_received_metadata.find("sync_test") != std::string::npos);
+      w.terminate();
+    } else {
+      // Test failed
+      REQUIRE(!"Metadata test failed");
+    }
+    return "";
+  });
+
+  w.set_html(html);
+  w.run();
+}
 
 TEST_CASE("Bad C API usage without crash") {
   webview_t w{};

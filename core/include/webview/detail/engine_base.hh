@@ -56,14 +56,14 @@ public:
     return navigate_impl(url);
   }
 
-  using binding_t = std::function<void(std::string, std::string, void *)>;
+  using binding_t = std::function<void(std::string, std::string, std::string, void *)>;
   class binding_ctx_t {
   public:
     binding_ctx_t(binding_t callback, void *arg)
         : m_callback(callback), m_arg(arg) {}
-    void call(std::string id, std::string args) const {
+    void call(std::string id, std::string args, std::string metadata = "{}") const {
       if (m_callback) {
-        m_callback(id, args, m_arg);
+        m_callback(id, args, metadata, m_arg);
       }
     }
 
@@ -74,12 +74,14 @@ public:
     void *m_arg;
   };
 
-  using sync_binding_t = std::function<std::string(std::string)>;
+  using sync_binding_t = std::function<std::string(std::string, std::string)>;
 
   // Synchronous bind
   noresult bind(const std::string &name, sync_binding_t fn) {
     auto wrapper = [this, fn](const std::string &id, const std::string &req,
-                              void * /*arg*/) { resolve(id, 0, fn(req)); };
+                              const std::string &metadata, void * /*arg*/) { 
+      resolve(id, 0, fn(req, metadata), "{}"); 
+    };
     return bind(name, wrapper, nullptr);
   }
 
@@ -117,16 +119,17 @@ window.__webview__.onUnbind(" +
   }
 
   noresult resolve(const std::string &id, int status,
-                   const std::string &result) {
+                   const std::string &result, const std::string &metadata = "{}") {
     // NOLINTNEXTLINE(modernize-avoid-bind): Lambda with move requires C++14
     return dispatch(std::bind(
-        [id, status, this](std::string escaped_result) {
+        [id, status, this](std::string escaped_result, std::string escaped_metadata) {
           std::string js = "window.__webview__.onReply(" + json_escape(id) +
                            ", " + std::to_string(status) + ", " +
-                           escaped_result + ")";
+                           escaped_result + ", " + escaped_metadata + ")";
           eval(js);
         },
-        result.empty() ? "undefined" : json_escape(result)));
+        result.empty() ? "undefined" : json_escape(result),
+        metadata.empty() ? "undefined" : json_escape(metadata)));
   }
 
   result<void *> window() { return window_impl(); }
@@ -229,6 +232,7 @@ protected:
     Webview_.prototype.call = function(method) {\n\
       var _id = generateId();\n\
       var _params = Array.prototype.slice.call(arguments, 1);\n\
+      var _metadata = {};\n\
       var promise = new Promise(function(resolve, reject) {\n\
         _promises[_id] = { resolve, reject };\n\
       });\n\
@@ -236,11 +240,12 @@ protected:
       this.post(JSON.stringify({\n\
         id: _id,\n\
         method: method,\n\
-        params: _params\n\
+        params: _params,\n\
+        metadata: _metadata\n\
       }));\n\
       return promise;\n\
     };\n\
-    Webview_.prototype.onReply = function(id, status, result) {\n\
+    Webview_.prototype.onReply = function(id, status, result, metadata) {\n\
       var promise = _promises[id];\n\
       if (result !== undefined) {\n\
         try {\n\
@@ -250,10 +255,19 @@ protected:
           return;\n\
         }\n\
       }\n\
+      if (metadata !== undefined) {\n\
+        try {\n\
+          metadata = JSON.parse(metadata);\n\
+        } catch (e) {\n\
+          promise.reject(new Error(\"Failed to parse binding metadata as JSON\"));\n\
+          return;\n\
+        }\n\
+      }\n\
+      var response = { result: result, metadata: metadata };\n\
       if (status === 0) {\n\
-        promise.resolve(result);\n\
+        promise.resolve(response);\n\
       } else {\n\
-        promise.reject(result);\n\
+        promise.reject(response);\n\
       }\n\
     };\n\
     Webview_.prototype.onBind = function(name) {\n\
@@ -306,12 +320,14 @@ protected:
     auto id = json_parse(msg, "id", 0);
     auto name = json_parse(msg, "method", 0);
     auto args = json_parse(msg, "params", 0);
+    auto metadata = json_parse(msg, "metadata", 0);
     auto found = bindings.find(name);
+    //__asm __volatile("int3");
     if (found == bindings.end()) {
       return;
     }
     const auto &context = found->second;
-    dispatch([=] { context.call(id, args); });
+    dispatch([=] { context.call(id, args, metadata); });
   }
 
   virtual void on_window_created() { inc_window_count(); }

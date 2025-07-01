@@ -52,7 +52,7 @@ int main() {
     w.set_size(480, 320, WEBVIEW_HINT_NONE);
 
     // A binding that counts up or down and immediately returns the new value.
-    w.bind("count", [&](const std::string &req) -> std::string {
+    w.bind("count", [&](const std::string &req, const std::string & /*metadata*/) -> std::string {
       // Imagine that req is properly parsed or use your own JSON parser.
       auto direction = std::stol(req.substr(1, req.size() - 1));
       return std::to_string(count += direction);
@@ -61,7 +61,7 @@ int main() {
     // A binding that creates a new thread and returns the result at a later time.
     w.bind(
         "compute",
-        [&](const std::string &id, const std::string &req, void * /*arg*/) {
+        [&](const std::string &id, const std::string &req, const std::string & /*metadata*/, void * /*arg*/) {
           // Create a thread and forget about it for the sake of simplicity.
           std::thread([&, id, req] {
             // Simulate load.
